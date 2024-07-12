@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migration Files Table</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table,
+        th,
+        td {
+            border: 1px solid black;
+        }
+
+        th,
+        td {
+            padding: 8px;
+            text-align: left;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgb(0, 0, 0);
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="myModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <p id="statusText">Migrating Data...</p>
+            <p id="pendingText"></p>
+            <p id="successText"></p>
+            <p id="failedText"></p>
+        </div>
+    </div>
+
+    <button type="button" onclick="showModal();">Migrate all</button>
+    <table id="migrationTable" style="max-width: 100%; overflow: auto; word-wrap: break-word;">
+        <thead>
+            <tr>
+                <th></th>
+                <th>ID</th>
+                <th>Old ID</th>
+                <th>Old URL</th>
+                <th>New URL</th>
+                <th>Action</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Rows will be added here dynamically -->
+        </tbody>
+    </table>
+
+    <script>
+        function showModal() {
+            var modal = document.getElementById("myModal");
+            var span = document.getElementsByClassName("close")[0];
+
+            modal.style.display = "block";
+            span.onclick = function () {
+                modal.style.display = "none";
+            }
+            window.onclick = function (event) {
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            }
+            migrateAll();
+        }
+        async function fetchData() {
+            // Replace this URL with your actual endpoint
+            const response = await fetch('/database/get-all-url-file');
+            const data = await response.json();
+            populateTable(data);
+        }
+
+        function populateTable(data) {
+            const tableBody = document.getElementById('migrationTable').getElementsByTagName('tbody')[0];
+            data.forEach((item) => {
+                const row = tableBody.insertRow();
+                row.id = "id_" + item.id;
+
+                // Checkbox
+                const cellCheckbox = row.insertCell();
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.disabled = true;
+                checkbox.checked = !!item.new_url; // Check if there's data in new_url
+                cellCheckbox.appendChild(checkbox);
+
+                // ID
+                const cellId = row.insertCell();
+                cellId.classList.add("id");
+                cellId.textContent = item.id;
+
+                // Old ID
+                const cellOldId = row.insertCell();
+                cellOldId.textContent = item.old_id;
+
+                // Old URL
+                const cellOldUrl = row.insertCell();
+                cellOldUrl.classList.add("old-url");
+                cellOldUrl.textContent = item.old_url;
+
+                // New URL
+                const cellNewUrl = row.insertCell();
+                cellNewUrl.classList.add("new-url");
+                // cellNewUrl.textContent = item.new_url;
+                cellNewUrl.innerHTML = `${!item.new_url ? '' : item.new_url}`;
+
+                // Action
+                const cellAction = row.insertCell();
+                if (!item.new_url) {
+                    const migrateButton = document.createElement('button');
+                    migrateButton.textContent = 'Migrate';
+                    migrateButton.type = "button";
+                    migrateButton.onclick = async function (event) {
+                        event.preventDefault();
+                        const response = await migrateData(item.id, item.old_url);
+                        if (response.status != 'error') {
+                            alert('Done! Refreshing the page!');
+                            location.reload();
+                        } else {
+                            alert(`Error: ${response.message}`);
+                        }
+                    };
+                    cellAction.appendChild(migrateButton);
+                }
+
+                const cellStatus = row.insertCell();
+                cellStatus.classList.add("status");
+                cellStatus.id = `status_${item.id}`;
+                if (item.new_url) {
+                    cellStatus.textContent = "Done";
+                }
+            });
+        }
+        async function migrateAll() {
+            const table = document.getElementById('migrationTable');
+            const rows = table.querySelectorAll('tr');
+            const toMigrate = [];
+            
+            console.log('Gathering data...');
+            
+            rows.forEach(row => {
+                const oldUrlCell = row.querySelector('.old-url');
+                const newUrlCell = row.querySelector('.new-url');
+
+
+                if (newUrlCell && newUrlCell.textContent === '') {
+                    const id = row.cells[1].textContent;
+                    const oldUrl = oldUrlCell.textContent;
+                    toMigrate.push({ id, old_url: oldUrl });
+                }
+            });
+            
+            console.log('Starting migration...');
+
+            let pendingCount = toMigrate.length;
+            let successCount = 0;
+            let failedCount = 0;
+
+            let stopperCounter = 0;
+
+            for (let i = 0; i < toMigrate.length; i++) {
+                const data = toMigrate[i];
+                updateStatus(pendingCount, successCount, failedCount);
+
+                const migrationResponse = await migrateData(data.id, data.old_url);
+                const statusCell = document.getElementById(`status_${data.id}`);
+
+                if (migrationResponse.status != 'error') {
+                    successCount++;
+                } else {
+                    statusCell.innerText = migrationResponse.message;
+                    failedCount++;
+                }
+
+                pendingCount--;
+                stopperCounter++;
+            }
+
+            toMigrate.forEach( async (data) => {
+                if (stopperCounter >= 10) {
+                    
+                }
+            });
+
+        }
+
+        async function updateStatus(pendingCount, successCount, failedCount) {
+            const pendingText = document.getElementById('pendingText');
+            const successText = document.getElementById('successText');
+            const failedText = document.getElementById('failedText');
+
+            let pending = "Pending: ";
+            let success = "Success: ";
+            let failed = "Failed: ";
+
+            pendingText.innerText = pending + pendingCount;
+            successText.innerText = success + successCount;
+            failedText.innerText = failed + failedCount;
+        }
+
+        async function migrateData(id, old_url) {
+            console.log(`Migrating data with url: ${old_url}`);
+            const response = await fetch('/file/migrate-single-file', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ id, old_url })
+            });
+
+            return await response.json();
+        }
+
+        // Load data when the page is ready
+        window.onload = fetchData;
+    </script>
+
+</body>
+
+</html>
